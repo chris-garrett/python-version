@@ -4,7 +4,7 @@ from __tasklib__ import TaskBuilder, TaskContext
 
 
 def _get_pytest_cmd():
-    files = " ".join(glob("./test_*.py"))
+    files = " ".join(glob("./tests/test_*.py"))
     return f"pytest --lf -v --capture=tee-sys {files}"
 
 

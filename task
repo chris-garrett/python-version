@@ -3,4 +3,6 @@
 export LOG_LEVEL=DEBUG
 export PYTHONDONTWRITEBYTECODE=1
 
+mkdir -p .local/build .local/test
+
 python3 -m __tasklib__ $@
