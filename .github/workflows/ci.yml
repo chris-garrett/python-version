@@ -37,7 +37,7 @@ jobs:
       - name: Tag single srvice on main
         if: github.ref == 'refs/heads/main'
         run: |
-          source .local/build-environment:
+          source .local/build-env
               
           export GIT_AUTHOR_EMAIL=ci@fbi.com
           export GIT_COMMITTER_EMAIL=ci@fbi.com
@@ -67,7 +67,7 @@ jobs:
       - name: Tag multi service on main
         if: github.ref == 'refs/heads/main'
         run: |
-          source .local/build-environment:
+          source .local/build-env
 
           export GIT_AUTHOR_EMAIL=ci@fbi.com
           export GIT_COMMITTER_EMAIL=ci@fbi.com
