@@ -1,4 +1,7 @@
+#!/usr/bin/env python3
+
 import argparse
+import json
 import os
 import re
 import shlex
@@ -115,7 +118,8 @@ def get_detached_branch(ctx: VersionContext, ver: Version) -> Version:
         raw_branches = exec(
             f"{_git_cmd_prefix(ctx)} branch --contains {git_hash}", capture=True
         ).stdout.strip()
-        branches = [l.strip() for l in raw_branches.splitlines() if "HEAD" not in l]
+        branches = [l.strip()
+                    for l in raw_branches.splitlines() if "HEAD" not in l]
         if len(branches) > 1:
             raise ValueError(
                 f"Multiple branches found for {git_hash}. Could not determine branch name"
@@ -224,9 +228,11 @@ def _validate_semver(ctx: VersionContext, ver: Version) -> Version:
 
 def _get_branch_full(ver: Version, separator: str = "-") -> str:
     branch_value = (
-        f"{separator}{ver.branch}" if ver.branch not in ("main", "master") else ""
+        f"{separator}{ver.branch}" if ver.branch not in (
+            "main", "master") else ""
     )
-    commits_value = f".{ver.commits}" if ver.branch not in ("main", "master") else ""
+    commits_value = f".{ver.commits}" if ver.branch not in (
+        "main", "master") else ""
     return f"{branch_value}{commits_value}"
 
 
@@ -267,7 +273,7 @@ def apply_tag_prefix(ctx: VersionContext, ver: Version) -> Version:
         return ValueError("No last_tag found.")
 
     if ctx.tag_prefix and ver.last_tag.startswith(ctx.tag_prefix):
-        ver.last_tag = ver.last_tag[len(ctx.tag_prefix) :].strip()
+        ver.last_tag = ver.last_tag[len(ctx.tag_prefix):].strip()
         ver.tag_prefix = ctx.tag_prefix
 
     return ver
@@ -332,3 +338,86 @@ def get_version(
         v = f(ctx, v)
         i += 1
     return v
+
+
+if __name__ == "__main__":
+    doc_keys = ",".join(
+        [
+            k
+            for k in vars(Version()).keys()
+            if k != "last_tag" and k != "last_hash" and k != "tag_prefix"
+        ]
+    )
+    parser = argparse.ArgumentParser(
+        description="Increment a semantic version component of a git tag."
+    )
+    parser.add_argument(
+        "component",
+        choices=["major", "minor", "patch"],
+        help="The version component to increment",
+    )
+    parser.add_argument(
+        "--tag-prefix", help="Optional prefix for git tags", default="")
+    parser.add_argument(
+        "--show",
+        default="all",
+        help=f"Comma separated fields to show. Default is all. Valid fields are: {doc_keys}",
+    )
+    parser.add_argument(
+        "--format",
+        default="comma",
+        help=f"Format to display in. Default is comma separated. Values: comma, json, env",
+    )
+    parser.add_argument(
+        "--pretty-json",
+        help="Optional pretty formatting for json output",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--comma-header",
+        help="Optional header for comma output",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--env-prefix", help="Optional prefix for output keys", default="VERSION_"
+    )
+    args = parser.parse_args()
+
+    ctx = VersionContext(increment=VersionIncrement(args.component.upper()))
+    if args.tag_prefix:
+        ctx.tag_prefix = args.tag_prefix
+    ver = get_version(ctx)
+    ver_dict = vars(ver)
+    del ver_dict["last_tag"]
+    del ver_dict["last_hash"]
+    del ver_dict["tag_prefix"]
+
+    # get/validate list of keys to print
+    print_keys = []
+    if args.show:
+        if args.show == "all":
+            print_keys = list(ver_dict.keys())
+        else:
+            for key in args.show.split(","):
+                if key not in ver_dict:
+                    raise ValueError(f"Field '{key}' not found.")
+            print_keys = args.show.split(",")
+    else:
+        print_keys.append(ver.semver_full)
+
+    # print output in json
+    if args.format == "json":
+        values = {key: ver_dict[key] for key in print_keys}
+        print(json.dumps(values, indent=4 if args.pretty_json else None))
+
+    # print output in env format
+    elif args.format == "env":
+        for key in print_keys:
+            print(f"{args.env_prefix.upper()}{key.upper()}={ver_dict[key]}")
+
+    # print output in comma separated format
+    else:
+        if args.comma_header:
+            print(",".join(print_keys))
+        values = [str(ver_dict[key]) for key in print_keys]
+        print(",".join(values))

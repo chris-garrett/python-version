@@ -28,7 +28,20 @@ def _test_watch(ctx: TaskContext):
     )
 
 
+def _version_watch(ctx: TaskContext):
+    ctx.exec(
+        f"""
+        watchexec
+            -r --project-origin .
+            -w .
+            -e py
+            python version.py minor --show major,minor,patch
+        """
+    )
+
+
 def configure(builder: TaskBuilder):
     module_name = "root"
     builder.add_task(module_name, "test", _test)
     builder.add_task(module_name, "test:watch", _test_watch)
+    builder.add_task(module_name, "version:watch", _version_watch)
