@@ -43,9 +43,9 @@ jobs:
           export GIT_COMMITTER_NAME="ci"
 
           git tag -f \
-            -a "${VERSION_TAG_PREFIX}${VERSION_TAG}" \
-            -m "${VERSION_TAG_PREFIX}${VERSION_TAG}" 
-          git push --force origin "${VERSION_TAG_PREFIX}${VERSION_TAG}"
+            -a "${VERSION_TAG_PREFIX}${VERSION_SEMVER}" \
+            -m "${VERSION_TAG_PREFIX}${VERSION_SEMVER}" 
+          git push --force origin "${VERSION_TAG_PREFIX}${VERSION_SEMVER}"
 
       ####################################
       # Mulit service example. has tag prefix
@@ -71,6 +71,6 @@ jobs:
           export GIT_COMMITTER_NAME="ci"
 
           git tag -f \
-            -a "${VERSION_TAG_PREFIX}${VERSION_TAG}" \
-            -m "${VERSION_TAG_PREFIX}${VERSION_TAG}" 
-          git push --force origin "${VERSION_TAG_PREFIX}${VERSION_TAG}"
+            -a "${VERSION_TAG_PREFIX}${VERSION_SEMVER}" \
+            -m "${VERSION_TAG_PREFIX}${VERSION_SEMVER}" 
+          git push --force origin "${VERSION_TAG_PREFIX}${VERSION_SEMVER}"
