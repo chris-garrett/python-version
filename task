@@ -3,6 +3,10 @@
 export LOG_LEVEL=DEBUG
 export PYTHONDONTWRITEBYTECODE=1
 
+if [  -f ".local/build-env" ]; then
+    source .local/build-env
+fi
+
 mkdir -p .local/build .local/test
 
 python3 -m __tasklib__ $@

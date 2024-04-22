@@ -16,12 +16,62 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
-      - name: Run a one-line script
-        run: echo Hello, world!
-
-      - name: Run a multi-line script
+      ####################################
+      # Single app example. no tag prefix
+      ####################################
+      - name: Write version information
         run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+          if [[ "${GITHUB_REF##*/}" == release/* || "${GITHUB_REF##*/}" == hotfix/* ]]; then
+            INCREMENT=patch 
+          else
+            INCREMENT=minor
+          fi
 
+          mkdir -p .local
+          python version.py $INCREMENT --format env > .local/build-env
+          cat .local/build-env
+
+      - name: Tag on main
+        if: github.ref == 'refs/heads/main'
+        run: |
+          export GIT_AUTHOR_EMAIL=ci@fbi.com
+          export GIT_COMMITTER_EMAIL=ci@fbi.com
+          export GIT_AUTHOR_NAME="ci"
+          export GIT_COMMITTER_NAME="ci"
+
+          git tag -f \
+            -a "${VERSION_TAG_PREFIX}${VERSION_SEMVER_FULL}" \
+            -m "${VERSION_TAG_PREFIX}${VERSION_SEMVER_FULL}" 
+          git push --force origin "${VERSION_TAG_PREFIX}${VERSION_SEMVER_FULL}"
+
+      ####################################
+      # Mulit service example. has tag prefix
+      ####################################
+      - name: Write version information
+        run: |
+          if [[ "${GITHUB_REF##*/}" == release/* || "${GITHUB_REF##*/}" == hotfix/* ]]; then
+            INCREMENT=patch 
+          else
+            INCREMENT=minor
+          fi
+
+          mkdir -p .local
+          python version.py $INCREMENT --tag-prefix=myservice-v --format env > .local/build-env
+          cat .local/build-env
+
+      - name: Tag on main
+        if: github.ref == 'refs/heads/main'
+        run: |
+          export GIT_AUTHOR_EMAIL=ci@fbi.com
+          export GIT_COMMITTER_EMAIL=ci@fbi.com
+          export GIT_AUTHOR_NAME="ci"
+          export GIT_COMMITTER_NAME="ci"
+
+          git tag -f \
+            -a "${VERSION_TAG_PREFIX}${VERSION_SEMVER_FULL}" \
+            -m "${VERSION_TAG_PREFIX}${VERSION_SEMVER_FULL}" 
+          git push --force origin "${VERSION_TAG_PREFIX}${VERSION_SEMVER_FULL}"
+         

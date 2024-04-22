@@ -342,11 +342,8 @@ def get_version(
 
 if __name__ == "__main__":
     doc_keys = ",".join(
-        [
-            k
-            for k in vars(Version()).keys()
-            if k != "last_tag" and k != "last_hash" and k != "tag_prefix"
-        ]
+        [k for k in vars(Version()).keys() if k !=
+         "last_tag" and k != "last_hash"]
     )
     parser = argparse.ArgumentParser(
         description="Increment a semantic version component of a git tag."
@@ -390,7 +387,6 @@ if __name__ == "__main__":
     ver_dict = vars(ver)
     del ver_dict["last_tag"]
     del ver_dict["last_hash"]
-    del ver_dict["tag_prefix"]
 
     # get/validate list of keys to print
     print_keys = []
@@ -413,11 +409,19 @@ if __name__ == "__main__":
     # print output in env format
     elif args.format == "env":
         for key in print_keys:
-            print(f"{args.env_prefix.upper()}{key.upper()}={ver_dict[key]}")
+            value = ver_dict[key]
+            print_value = ""
+            if value is not None:
+                if isinstance(value, str):
+                    print_value = f'"{value}"'
+                else:
+                    print_value = str(value)
+            print(f'{args.env_prefix.upper()}{key.upper()}={print_value}')
 
     # print output in comma separated format
     else:
         if args.comma_header:
             print(",".join(print_keys))
-        values = [str(ver_dict[key]) for key in print_keys]
+
+        values = ["" if ver_dict[key] is None else str(ver_dict[key]) for key in print_keys]
         print(",".join(values))
