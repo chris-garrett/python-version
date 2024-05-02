@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
 
+#
+# git@github.com:chris-garrett/python-version.git
+#
+
+# CHANGELOG
+#
+# Thu, May 2, 2024  - moved shell shebang to top of file
+#
+# Sun, Apr 21, 2024 - initial version
+#
+
 import argparse
 import json
 import os
@@ -9,7 +20,6 @@ import subprocess
 from dataclasses import dataclass
 from enum import Enum
 from subprocess import CompletedProcess
-from typing import Optional
 
 semver_rx = re.compile(r"\.")
 
@@ -416,12 +426,14 @@ if __name__ == "__main__":
                     print_value = f'"{value}"'
                 else:
                     print_value = str(value)
-            print(f'{args.env_prefix.upper()}{key.upper()}={print_value}')
+            print(f"{args.env_prefix.upper()}{key.upper()}={print_value}")
 
     # print output in comma separated format
     else:
         if args.comma_header:
             print(",".join(print_keys))
 
-        values = ["" if ver_dict[key] is None else str(ver_dict[key]) for key in print_keys]
+        values = [
+            "" if ver_dict[key] is None else str(ver_dict[key]) for key in print_keys
+        ]
         print(",".join(values))
