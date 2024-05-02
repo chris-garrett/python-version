@@ -6,7 +6,9 @@
 
 # CHANGELOG
 #
-# Thu, May 2, 2024  - moved shell shebang to top of file
+# Thu, May 2, 2024  - fix: moved shell shebang to top of file
+#                   - feat: dont strip tag prefix from tag. populate last_tag, last_hash, add timestamp (utc)
+#                   - feat: cleanup cli args so they are more consistent. csv and csv-header, json and json-pretty
 #
 # Sun, Apr 21, 2024 - initial version
 #
@@ -389,17 +391,17 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--format",
-        default="comma",
-        help=f"Format to display in. Default is comma separated. Values: comma, json, env",
+        default="csv",
+        help=f"Format to display in. Default is comma separated. Values: csv, json, env",
     )
     parser.add_argument(
-        "--pretty-json",
+        "--json-pretty",
         help="Optional pretty formatting for json output",
         action="store_true",
     )
     parser.add_argument(
-        "--comma-header",
-        help="Optional header for comma output",
+        "--csv-header",
+        help="Optional header for csv output",
         action="store_true",
     )
     parser.add_argument(
@@ -429,7 +431,7 @@ if __name__ == "__main__":
     # print output in json
     if args.format == "json":
         values = {key: ver_dict[key] for key in print_keys}
-        print(json.dumps(values, indent=4 if args.pretty_json else None))
+        print(json.dumps(values, indent=4 if args.json_pretty else None))
 
     # print output in env format
     elif args.format == "env":
@@ -443,9 +445,9 @@ if __name__ == "__main__":
                     print_value = str(value)
             print(f"{args.env_prefix.upper()}{key.upper()}={print_value}")
 
-    # print output in comma separated format
+    # print output in csv separated format
     else:
-        if args.comma_header:
+        if args.csv_header:
             print(",".join(print_keys))
 
         values = [
