@@ -18,6 +18,7 @@ import re
 import shlex
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from subprocess import CompletedProcess
 
@@ -59,6 +60,7 @@ class Version:
     semver_full: str = None
     pep440: str = None
     nuget: str = None
+    timestamp: str = None
 
 
 def exec(
@@ -128,8 +130,7 @@ def get_detached_branch(ctx: VersionContext, ver: Version) -> Version:
         raw_branches = exec(
             f"{_git_cmd_prefix(ctx)} branch --contains {git_hash}", capture=True
         ).stdout.strip()
-        branches = [l.strip()
-                    for l in raw_branches.splitlines() if "HEAD" not in l]
+        branches = [l.strip() for l in raw_branches.splitlines() if "HEAD" not in l]
         if len(branches) > 1:
             raise ValueError(
                 f"Multiple branches found for {git_hash}. Could not determine branch name"
@@ -191,7 +192,11 @@ def build_version_components(ctx: VersionContext, ver: Version) -> Version:
     if not ver.last_tag or len(ver.last_tag.strip()) == 0:
         return ValueError("No last_tag found.")
 
-    parts = re.split(semver_rx, ver.last_tag.strip())
+    last_ver = ver.last_tag
+    if ver.tag_prefix and len(ver.tag_prefix) > 0:
+        last_ver = ver.last_tag[len(ver.tag_prefix) :].strip()
+
+    parts = re.split(semver_rx, last_ver)
     if len(parts) != 3:
         return ValueError("Invalid tag format. Expected 1.2.3")
 
@@ -218,7 +223,8 @@ def build_tag(ctx: VersionContext, ver: Version) -> Version:
             f"major ({ver.major}), minor ({ver.minor}) or patch ({ver.patch}) values not set correctly."
         )
 
-    ver.tag = f"{ver.major}.{ver.minor}.{ver.patch}"
+    tag_prefix = f"{ver.tag_prefix}" if ver.tag_prefix else ""
+    ver.tag = f"{tag_prefix}{ver.major}.{ver.minor}.{ver.patch}"
 
     return ver
 
@@ -238,11 +244,9 @@ def _validate_semver(ctx: VersionContext, ver: Version) -> Version:
 
 def _get_branch_full(ver: Version, separator: str = "-") -> str:
     branch_value = (
-        f"{separator}{ver.branch}" if ver.branch not in (
-            "main", "master") else ""
+        f"{separator}{ver.branch}" if ver.branch not in ("main", "master") else ""
     )
-    commits_value = f".{ver.commits}" if ver.branch not in (
-        "main", "master") else ""
+    commits_value = f".{ver.commits}" if ver.branch not in ("main", "master") else ""
     return f"{branch_value}{commits_value}"
 
 
@@ -277,13 +281,12 @@ def build_nuget(ctx: VersionContext, ver: Version) -> Version:
 
 def apply_tag_prefix(ctx: VersionContext, ver: Version) -> Version:
     #
-    # Stripts prefix off tag and adds prefix to version output (if it exists)
+    # Adds prefix to version output (if it exists)
     #
     if not ver.last_tag or len(ver.last_tag.strip()) == 0:
         return ValueError("No last_tag found.")
 
     if ctx.tag_prefix and ver.last_tag.startswith(ctx.tag_prefix):
-        ver.last_tag = ver.last_tag[len(ctx.tag_prefix):].strip()
         ver.tag_prefix = ctx.tag_prefix
 
     return ver
@@ -292,11 +295,11 @@ def apply_tag_prefix(ctx: VersionContext, ver: Version) -> Version:
 def get_last_tag(ctx: VersionContext, ver: Version) -> Version:
     #
     # Get the last tag version (1.2.3) prior to this commit
-    # and strip the tag prefix if it exists
     #
     if not ver.hash or len(ver.hash.strip()) == 0:
         return ValueError("No hash found.")
 
+    # get last tag
     tag_prefix_option = f"--match={ctx.tag_prefix}*" if ctx.tag_prefix else ""
     result = exec(
         f"{_git_cmd_prefix(ctx)} describe --tags --abbrev=0 {tag_prefix_option} {ver.hash}^",
@@ -304,6 +307,21 @@ def get_last_tag(ctx: VersionContext, ver: Version) -> Version:
     )
     if result.returncode == 0:
         ver.last_tag = result.stdout.strip()
+
+    # get last tag hash
+    result = exec(
+        f"{_git_cmd_prefix(ctx)} rev-list -n 1 {ver.last_tag}",
+        capture=True,
+    )
+    if result.returncode == 0:
+        ver.last_hash = result.stdout.strip()
+
+    return ver
+
+
+def get_timestamp(ctx: VersionContext, ver: Version) -> Version:
+    now = datetime.utcnow()
+    ver.timestamp = now.strftime("%Y%m%dT%H%M%SZ")
     return ver
 
 
@@ -325,6 +343,7 @@ def get_version(
     ctx: VersionContext,
     funcs=[
         validate_context,
+        get_timestamp,
         get_hash,
         get_last_tag,
         get_commit_count,
@@ -352,8 +371,7 @@ def get_version(
 
 if __name__ == "__main__":
     doc_keys = ",".join(
-        [k for k in vars(Version()).keys() if k !=
-         "last_tag" and k != "last_hash"]
+        [k for k in vars(Version()).keys() if k != "last_tag" and k != "last_hash"]
     )
     parser = argparse.ArgumentParser(
         description="Increment a semantic version component of a git tag."
@@ -363,8 +381,7 @@ if __name__ == "__main__":
         choices=["major", "minor", "patch"],
         help="The version component to increment",
     )
-    parser.add_argument(
-        "--tag-prefix", help="Optional prefix for git tags", default="")
+    parser.add_argument("--tag-prefix", help="Optional prefix for git tags", default="")
     parser.add_argument(
         "--show",
         default="all",
@@ -395,8 +412,6 @@ if __name__ == "__main__":
         ctx.tag_prefix = args.tag_prefix
     ver = get_version(ctx)
     ver_dict = vars(ver)
-    del ver_dict["last_tag"]
-    del ver_dict["last_hash"]
 
     # get/validate list of keys to print
     print_keys = []

@@ -2,6 +2,7 @@ import os
 import re
 import shutil
 import sys
+from datetime import datetime
 
 import pytest
 
@@ -9,9 +10,9 @@ from tests.configure import git, git_repo, init_git
 from version import (Version, VersionContext, VersionIncrement,
                      apply_tag_prefix, build_version_components, exec,
                      get_branch, get_commit_count, get_detached_branch,
-                     get_github_branch, get_hash, get_last_tag, get_version,
-                     sanitize_branch_name, strip_branch_components,
-                     validate_context)
+                     get_github_branch, get_hash, get_last_tag, get_timestamp,
+                     get_version, sanitize_branch_name,
+                     strip_branch_components, validate_context)
 
 # Setup main and a single branch
 # (main) 0.1.0 -> 0.2.0 -> 0.3.0
@@ -27,7 +28,8 @@ from version import (Version, VersionContext, VersionIncrement,
 #   branch_2 : 63e520ae66faaa16fc3d72ece793f59fc5b9a871 note: chore/branch1, no tag, branched off 0.2.0
 # }
 hashes = init_git()
-# print(hashes)
+# for key in hashes:
+#    print(key, hashes[key])
 semver_rx = re.compile(r"\.")
 tag_prefix_data = [None, "myservice-v"]
 
@@ -59,6 +61,7 @@ def test_get_last_tag(tag_prefix):
     v = Version(hash=hashes["main_3"])
     v = get_last_tag(c, v)
     assert v.last_tag in ("0.2.0", "myservice-v0.2.0")
+    assert v.last_hash == hashes["main_2"]
 
 
 @pytest.mark.parametrize("tag", ["0.2.0", "myservice-v0.2.0"])
@@ -85,7 +88,7 @@ def test_apply_tag_prefix(tag_prefix):
     c.tag_prefix = tag_prefix
     v = Version(last_tag=last_tag)
     v = apply_tag_prefix(c, v)
-    assert v.last_tag == "0.2.0"
+    assert v.last_tag == last_tag
     assert v.tag_prefix == tag_prefix
 
 
@@ -242,7 +245,19 @@ def test_build_apple():
     pass
 
 
-def test_happy_path_integration_main():
+def test_timestamp():
+    c = default_context()
+    v = Version()
+    v = get_timestamp(c, v)
+
+    unow = datetime.utcnow()
+    ts = datetime.strptime(v.timestamp, "%Y%m%dT%H%M%SZ")
+
+    assert v.timestamp is not None
+    assert (unow.timestamp() - ts.timestamp()) < 1.0
+
+
+def test_happy_path_integration_main_with_prefix():
     c = default_context()
     c.tag_prefix = "myservice-v"
     git("switch main")
@@ -253,9 +268,30 @@ def test_happy_path_integration_main():
     assert v.commits == 1
     assert v.branch == "main"
     assert v.hash == hashes["main_3"]
-    assert v.last_tag == "0.2.0"
-    assert v.last_hash is None
+    assert v.last_tag == "myservice-v0.2.0"
+    assert v.last_hash == hashes["main_2"]
     assert v.tag_prefix == "myservice-v"
+    assert v.tag == "myservice-v0.3.0"
+    assert v.semver == "0.3.0"
+    assert v.semver_full == "0.3.0"
+    assert v.pep440 == "0.3.0"
+    assert v.nuget == "0.3.0"
+
+
+def test_happy_path_integration_main_no_prefix():
+    c = default_context()
+    c.tag_prefix is None
+    git("switch main")
+    v = get_version(c)
+    assert v.major == 0
+    assert v.minor == 3
+    assert v.patch == 0
+    assert v.commits == 1
+    assert v.branch == "main"
+    assert v.hash == hashes["main_3"]
+    assert v.last_tag == "0.2.0"
+    assert v.last_hash == hashes["main_2"]
+    assert v.tag_prefix is None
     assert v.tag == "0.3.0"
     assert v.semver == "0.3.0"
     assert v.semver_full == "0.3.0"
@@ -276,10 +312,10 @@ def test_happy_path_integration_long_branch():
     assert v.commits == 1
     assert v.branch == "jira-1234-this-is-a-really-cool-feature-i-think"
     assert v.hash == hashes["main_3"]
-    assert v.last_tag == "0.2.0"
-    assert v.last_hash is None
+    assert v.last_tag == "myservice-v0.2.0"
+    assert v.last_hash == hashes["main_2"]
     assert v.tag_prefix == "myservice-v"
-    assert v.tag == "0.3.0"
+    assert v.tag == "myservice-v0.3.0"
     assert v.semver == "0.3.0"
     assert v.semver_full == "0.3.0-jira-1234-this-is-a-really-cool-feature-i-think.1"
     assert v.pep440 == "0.3.0+jira-1234-this-is-a-really-cool-feature-i-think.1"
