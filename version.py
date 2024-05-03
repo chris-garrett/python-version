@@ -6,6 +6,8 @@
 
 # CHANGELOG
 #
+# Fri, May 3, 2024  - feat: expose strip-branch-components as a cli arg
+#
 # Thu, May 2, 2024  - fix: moved shell shebang to top of file
 #                   - feat: dont strip tag prefix from tag. populate last_tag, last_hash, add timestamp (utc)
 #                   - feat: cleanup cli args so they are more consistent. csv and csv-header, json and json-pretty
@@ -407,11 +409,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--env-prefix", help="Optional prefix for output keys", default="VERSION_"
     )
+    parser.add_argument(
+        "--strip-branch-components",
+        help="Optional number of branch components (paths) to strip from the start of the branch name",
+    )
     args = parser.parse_args()
 
     ctx = VersionContext(increment=VersionIncrement(args.component.upper()))
     if args.tag_prefix:
         ctx.tag_prefix = args.tag_prefix
+    if args.strip_branch_components:
+        ctx.strip_branch_components = int(args.strip_branch_components)
     ver = get_version(ctx)
     ver_dict = vars(ver)
 
