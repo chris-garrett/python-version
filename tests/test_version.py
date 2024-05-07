@@ -224,6 +224,24 @@ def test_strip_branch_components():
     v = strip_branch_components(c, v)
     assert v.branch == "jira-1234-do-something"
 
+    # remove first 1 components
+    c.strip_branch_components = 1
+    v.branch = "dev/name/jira-1234-do-something"
+    v = strip_branch_components(c, v)
+    assert v.branch == "name/jira-1234-do-something"
+
+    # bug found in testing
+    c.strip_branch_components = 2
+    v.branch = "main"
+    ve: ValueError = strip_branch_components(c, v)
+    assert str(ve) == "Cannot strip 2 components from a branch 'main' with only 1 component(s)"
+
+    # bug found in testing
+    c.strip_branch_components = 0
+    v.branch = "dev/name/jira-1234-do-something"
+    v = strip_branch_components(c, v)
+    assert v.branch == "dev/name/jira-1234-do-something"
+
 
 def test_build_tag():
     pass

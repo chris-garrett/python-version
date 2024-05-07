@@ -6,6 +6,8 @@
 
 # CHANGELOG
 #
+# Tue, May 7, 2024  - fix: strip-components wasnt actually using the value, add better error message, skip if 0
+#
 # Fri, May 3, 2024  - feat: expose strip-branch-components as a cli arg
 #
 # Thu, May 2, 2024  - fix: moved shell shebang to top of file
@@ -156,9 +158,20 @@ def sanitize_branch_name(ctx: VersionContext, ver: Version) -> Version:
 
 def strip_branch_components(ctx: VersionContext, ver: Version) -> Version:
     if ctx.strip_branch_components:
+        if ctx.strip_branch_components == 0:
+            return ver
+
         if not ver.branch or len(ver.branch.strip()) == 0:
             return ValueError("No branch found.")
-        ver.branch = "/".join(ver.branch.split("/")[2:])
+
+        parts = ver.branch.split("/")
+        remaining = len(parts) - ctx.strip_branch_components
+        if remaining < 1:
+            return ValueError(
+                f"Cannot strip {ctx.strip_branch_components} components from a branch '{ver.branch}' with only {len(parts)} component(s)"
+            )
+
+        ver.branch = "/".join(ver.branch.split("/")[ctx.strip_branch_components:])
     return ver
 
 
