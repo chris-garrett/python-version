@@ -1,18 +1,18 @@
 import os
 import re
-import shutil
-import sys
 from datetime import datetime
 
 import pytest
 
 from tests.configure import git, git_repo, init_git
 from version import (Version, VersionContext, VersionIncrement,
-                     apply_tag_prefix, build_version_components, exec,
-                     get_branch, get_commit_count, get_detached_branch,
-                     get_github_branch, get_hash, get_last_tag, get_timestamp,
-                     get_version, sanitize_branch_name,
-                     strip_branch_components, validate_context)
+                     apply_tag_prefix, build_nuget, build_pep440, build_semver,
+                     build_tag, build_version_components, exec, get_branch,
+                     get_commit_count, get_detached_branch, get_github_branch,
+                     get_hash, get_last_tag, get_timestamp, get_version,
+                     sanitize_branch_name, strip_branch_components,
+                     validate_context, validate_semver,
+                     validate_version_components)
 
 # Setup main and a single branch
 # (main) 0.1.0 -> 0.2.0 -> 0.3.0
@@ -64,6 +64,14 @@ def test_get_last_tag(tag_prefix):
     assert v.last_hash == hashes["main_2"]
 
 
+def test_get_last_tag_validation():
+    with pytest.raises(ValueError):
+        v = Version()
+        c = VersionContext(increment=VersionIncrement.MAJOR)
+        c.hash = None
+        v = get_last_tag(c, v)
+
+
 @pytest.mark.parametrize("tag", ["0.2.0", "myservice-v0.2.0"])
 def test_get_commit_count(tag):
     """
@@ -74,6 +82,14 @@ def test_get_commit_count(tag):
     v = Version(last_tag=tag)
     v = get_commit_count(c, v)
     assert v.commits == 2
+
+    with pytest.raises(ValueError):
+        v.last_tag = None
+        v = get_commit_count(c, v)
+
+    with pytest.raises(ValueError):
+        v.last_tag = "    "
+        v = get_commit_count(c, v)
 
 
 @pytest.mark.parametrize("tag_prefix", tag_prefix_data)
@@ -90,6 +106,49 @@ def test_apply_tag_prefix(tag_prefix):
     v = apply_tag_prefix(c, v)
     assert v.last_tag == last_tag
     assert v.tag_prefix == tag_prefix
+
+
+def test_apply_tag_prefix_validation():
+    with pytest.raises(ValueError):
+        v = Version()
+        c = VersionContext(increment=VersionIncrement.MAJOR)
+        c.last_tag = None
+        v = apply_tag_prefix(c, v)
+
+
+def test_build_version_validation():
+
+    with pytest.raises(ValueError):
+        v = Version()
+        c = default_context()
+        c.last_tag = None
+        v = build_version_components(c, v)
+
+    with pytest.raises(ValueError):
+        v = Version()
+        c = default_context()
+        c.last_tag = "   "
+        v = build_version_components(c, v)
+
+    with pytest.raises(ValueError):
+        c = VersionContext(increment=VersionIncrement.MAJOR)
+        v = Version(last_tag="hello-vabc", tag_prefix="hello-v")
+        v = build_version_components(c, v)
+
+    with pytest.raises(ValueError):
+        c = VersionContext(increment=VersionIncrement.MAJOR)
+        v = Version(last_tag="hello-va.b.c", tag_prefix="hello-v")
+        v = build_version_components(c, v)
+
+    with pytest.raises(ValueError):
+        c = VersionContext(increment=VersionIncrement.MAJOR)
+        v = Version(last_tag="hello-v1.b.c", tag_prefix="hello-v")
+        v = build_version_components(c, v)
+
+    with pytest.raises(ValueError):
+        c = VersionContext(increment=VersionIncrement.MAJOR)
+        v = Version(last_tag="hello-v1.2.c", tag_prefix="hello-v")
+        v = build_version_components(c, v)
 
 
 def test_build_version_major():
@@ -194,6 +253,26 @@ def test_get_detached_branch():
     v = get_detached_branch(c, v)
     assert v.branch == "chore/branch1"
 
+    with pytest.raises(ValueError):
+        v.branch = None
+        v.hash = hashes["main_3"]
+        v = get_detached_branch(c, v)
+
+    with pytest.raises(ValueError):
+        v.branch = "  "
+        v.hash = hashes["main_3"]
+        v = get_detached_branch(c, v)
+
+    with pytest.raises(ValueError):
+        v.branch = "main"
+        v.hash = None
+        v = get_detached_branch(c, v)
+
+    with pytest.raises(ValueError):
+        v.branch = "main"
+        v.hash = "    "
+        v = get_detached_branch(c, v)
+
 
 def test_sanitize_branch_name():
     c = default_context()
@@ -207,6 +286,14 @@ def test_sanitize_branch_name():
     # test with a branch name that offensive
     v.branch = "main/one/two-three"
     v = sanitize_branch_name(c, v)
+
+    with pytest.raises(ValueError):
+        v.branch = None
+        v = sanitize_branch_name(c, v)
+
+    with pytest.raises(ValueError):
+        v.branch = "   "
+        v = sanitize_branch_name(c, v)
 
 
 def test_strip_branch_components():
@@ -231,10 +318,14 @@ def test_strip_branch_components():
     assert v.branch == "name/jira-1234-do-something"
 
     # bug found in testing
-    c.strip_branch_components = 2
-    v.branch = "main"
-    ve: ValueError = strip_branch_components(c, v)
-    assert str(ve) == "Cannot strip 2 components from a branch 'main' with only 1 component(s)"
+    with pytest.raises(ValueError):
+        v.branch = None
+        v = strip_branch_components(c, v)
+
+    with pytest.raises(ValueError, match="Cannot strip 2 components.*"):
+        c.strip_branch_components = 2
+        v.branch = "main"
+        v = strip_branch_components(c, v)
 
     # bug found in testing
     c.strip_branch_components = 0
@@ -243,12 +334,68 @@ def test_strip_branch_components():
     assert v.branch == "dev/name/jira-1234-do-something"
 
 
-def test_build_tag():
-    pass
+def test_validate_version_components():
+
+    # throw for missing major
+    with pytest.raises(ValueError):
+        v = Version()
+        v = validate_version_components(v)
+
+    # throw for missing minor
+    with pytest.raises(ValueError):
+        v = Version(major=1)
+        v = validate_version_components(v)
+
+    # throw for missing patch
+    with pytest.raises(ValueError):
+        v = Version(major=1, minor=2)
+        v = validate_version_components(v)
+
+
+def test_validate_semver():
+
+    # throw for missing branch
+    with pytest.raises(ValueError):
+        v = Version(major=9, minor=8, patch=7, branch=None)
+        validate_semver(v)
+
+    with pytest.raises(ValueError):
+        v = Version(major=9, minor=8, patch=7, branch="    ")
+        validate_semver(v)
+
+    with pytest.raises(ValueError):
+        v = Version(major=9, minor=8, patch=7,
+                    branch="dev/p/one", commits=None)
+        validate_semver(v)
+
+    v = Version(major=9, minor=8, patch=7, branch="dev/p/one", commits=1)
+    validate_semver(v)
 
 
 def test_build_semver():
-    pass
+    c = VersionContext(increment=VersionIncrement.MAJOR)
+    v = Version(
+        major=1,
+        minor=2,
+        patch=3,
+        commits=3,
+        branch="main",
+        tag_prefix="hello-service-v",
+    )
+    v = build_semver(c, v)
+    assert v.semver == "1.2.3"
+
+
+def test_build_tag():
+    c = VersionContext(increment=VersionIncrement.MAJOR)
+    v = Version(major=1, minor=2, patch=3)
+    v = build_tag(c, v)
+    assert v.tag == "1.2.3"
+
+    c = VersionContext(increment=VersionIncrement.MAJOR)
+    v = Version(major=1, minor=2, patch=3, tag_prefix="hello-service-v")
+    v = build_tag(c, v)
+    assert v.tag == "hello-service-v1.2.3"
 
 
 def test_build_pep440():
@@ -273,6 +420,13 @@ def test_timestamp():
 
     assert v.timestamp is not None
     assert (unow.timestamp() - ts.timestamp()) < 1.0
+
+
+def test_validate_context():
+    with pytest.raises(ValueError):
+        v = Version()
+        c = VersionContext(increment="NOPE")
+        validate_context(c, v)
 
 
 def test_happy_path_integration_main_with_prefix():

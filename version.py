@@ -7,6 +7,7 @@
 # CHANGELOG
 #
 # Tue, May 7, 2024  - fix: strip-components wasnt actually using the value, add better error message, skip if 0
+#                   - fix: dont return ValueErrors, raise them!
 #
 # Fri, May 3, 2024  - feat: expose strip-branch-components as a cli arg
 #
@@ -127,16 +128,17 @@ def get_detached_branch(ctx: VersionContext, ver: Version) -> Version:
     Try to determine the branch name if we are detached (branch == HEAD)
     """
     if _none_or_empty(ver.branch):
-        return ValueError("No branch found.")
+        raise ValueError("No branch found.")
     if _none_or_empty(ver.hash):
-        return ValueError("No hash found.")
+        raise ValueError("No hash found.")
 
     if ver.branch.strip().lower() == "head":
         git_hash = ver.hash
         raw_branches = exec(
             f"{_git_cmd_prefix(ctx)} branch --contains {git_hash}", capture=True
         ).stdout.strip()
-        branches = [l.strip() for l in raw_branches.splitlines() if "HEAD" not in l]
+        branches = [l.strip()
+                    for l in raw_branches.splitlines() if "HEAD" not in l]
         if len(branches) > 1:
             raise ValueError(
                 f"Multiple branches found for {git_hash}. Could not determine branch name"
@@ -149,8 +151,8 @@ def sanitize_branch_name(ctx: VersionContext, ver: Version) -> Version:
     """
     Removes special characters from the branch name
     """
-    if not ver.branch or len(ver.branch.strip()) == 0:
-        return ValueError("No branch found.")
+    if _none_or_empty(ver.branch):
+        raise ValueError("No branch found.")
 
     ver.branch = re.sub(r"[^a-zA-Z0-9]", "-", ver.branch)
     return ver
@@ -161,17 +163,18 @@ def strip_branch_components(ctx: VersionContext, ver: Version) -> Version:
         if ctx.strip_branch_components == 0:
             return ver
 
-        if not ver.branch or len(ver.branch.strip()) == 0:
-            return ValueError("No branch found.")
+        if _none_or_empty(ver.branch):
+            raise ValueError("No branch found.")
 
         parts = ver.branch.split("/")
         remaining = len(parts) - ctx.strip_branch_components
         if remaining < 1:
-            return ValueError(
+            raise ValueError(
                 f"Cannot strip {ctx.strip_branch_components} components from a branch '{ver.branch}' with only {len(parts)} component(s)"
             )
 
-        ver.branch = "/".join(ver.branch.split("/")[ctx.strip_branch_components:])
+        ver.branch = "/".join(ver.branch.split("/")
+                              [ctx.strip_branch_components:])
     return ver
 
 
@@ -179,8 +182,8 @@ def get_commit_count(ctx: VersionContext, ver: Version) -> Version:
     #
     # Get the number of commits since the last tag
     #
-    if not ver.last_tag or len(ver.last_tag.strip()) == 0:
-        return ValueError("No last_tag found.")
+    if _none_or_empty(ver.last_tag):
+        raise ValueError("No last_tag found.")
 
     result = exec(
         f"{_git_cmd_prefix(ctx)} rev-list --ancestry-path {ver.last_tag}..HEAD --count",
@@ -206,16 +209,21 @@ def build_version_components(ctx: VersionContext, ver: Version) -> Version:
     #
     # Populate the version components from the tag
     #
-    if not ver.last_tag or len(ver.last_tag.strip()) == 0:
-        return ValueError("No last_tag found.")
+    if _none_or_empty(ver.last_tag):
+        raise ValueError("No last_tag found.")
 
     last_ver = ver.last_tag
     if ver.tag_prefix and len(ver.tag_prefix) > 0:
-        last_ver = ver.last_tag[len(ver.tag_prefix) :].strip()
+        last_ver = ver.last_tag[len(ver.tag_prefix):].strip()
 
     parts = re.split(semver_rx, last_ver)
-    if len(parts) != 3:
-        return ValueError("Invalid tag format. Expected 1.2.3")
+    if (
+        len(parts) != 3
+        or not parts[0].isdigit()
+        or not parts[1].isdigit()
+        or not parts[2].isdigit()
+    ):
+        raise ValueError("Invalid tag format. Expected 1.2.3")
 
     ver.major = int(parts[0])
     ver.minor = int(parts[1])
@@ -234,11 +242,32 @@ def build_version_components(ctx: VersionContext, ver: Version) -> Version:
     return ver
 
 
+def is_int(v) -> bool:
+    return isinstance(v, int)
+
+
+def validate_version_components(ver: Version) -> Version:
+    if is_int(ver.major) and is_int(ver.minor) and is_int(ver.patch):
+        return ver
+
+    raise ValueError(
+        f"major ({ver.major}), minor ({ver.minor}) or patch ({ver.patch}) values not set correctly."
+    )
+
+
+def validate_semver(ver: Version) -> Version:
+    validate_version_components(ver)
+
+    if _none_or_empty(ver.branch):
+        raise ValueError("No branch found.")
+    if ver.commits is None:
+        raise ValueError("No commits found.")
+
+    return ver
+
+
 def build_tag(ctx: VersionContext, ver: Version) -> Version:
-    if ver.major is None or ver.minor is None or ver.patch is None:
-        return ValueError(
-            f"major ({ver.major}), minor ({ver.minor}) or patch ({ver.patch}) values not set correctly."
-        )
+    validate_version_components(ver)
 
     tag_prefix = f"{ver.tag_prefix}" if ver.tag_prefix else ""
     ver.tag = f"{tag_prefix}{ver.major}.{ver.minor}.{ver.patch}"
@@ -246,29 +275,18 @@ def build_tag(ctx: VersionContext, ver: Version) -> Version:
     return ver
 
 
-def _validate_semver(ctx: VersionContext, ver: Version) -> Version:
-    if ver.major is None or ver.minor is None or ver.patch is None:
-        return ValueError(
-            f"major ({ver.major}), minor ({ver.minor}) or patch ({ver.patch}) values not set correctly."
-        )
-    if not ver.branch or len(ver.branch.strip()) == 0:
-        return ValueError("No branch found.")
-    if ver.commits is None:
-        return ValueError("No commits found.")
-
-    return ver
-
-
 def _get_branch_full(ver: Version, separator: str = "-") -> str:
     branch_value = (
-        f"{separator}{ver.branch}" if ver.branch not in ("main", "master") else ""
+        f"{separator}{ver.branch}" if ver.branch not in (
+            "main", "master") else ""
     )
-    commits_value = f".{ver.commits}" if ver.branch not in ("main", "master") else ""
+    commits_value = f".{ver.commits}" if ver.branch not in (
+        "main", "master") else ""
     return f"{branch_value}{commits_value}"
 
 
 def build_semver(ctx: VersionContext, ver: Version) -> Version:
-    _validate_semver(ctx, ver)
+    validate_semver(ver)
 
     ver.semver = f"{ver.major}.{ver.minor}.{ver.patch}"
     ver.semver_full = f"{ver.semver}{_get_branch_full(ver)}"
@@ -277,7 +295,7 @@ def build_semver(ctx: VersionContext, ver: Version) -> Version:
 
 
 def build_pep440(ctx: VersionContext, ver: Version) -> Version:
-    _validate_semver(ctx, ver)
+    validate_semver(ver)
 
     ver.pep440 = f"{ver.semver}{_get_branch_full(ver, separator='+')}"
 
@@ -285,7 +303,7 @@ def build_pep440(ctx: VersionContext, ver: Version) -> Version:
 
 
 def build_nuget(ctx: VersionContext, ver: Version) -> Version:
-    _validate_semver(ctx, ver)
+    validate_semver(ver)
 
     ver.nuget = f"{ver.semver}{_get_branch_full(ver)}"
     # nuget has a max length of 20 chars for prerelease versions
@@ -300,8 +318,8 @@ def apply_tag_prefix(ctx: VersionContext, ver: Version) -> Version:
     #
     # Adds prefix to version output (if it exists)
     #
-    if not ver.last_tag or len(ver.last_tag.strip()) == 0:
-        return ValueError("No last_tag found.")
+    if _none_or_empty(ver.last_tag):
+        raise ValueError("No last_tag found.")
 
     if ctx.tag_prefix and ver.last_tag.startswith(ctx.tag_prefix):
         ver.tag_prefix = ctx.tag_prefix
@@ -313,8 +331,8 @@ def get_last_tag(ctx: VersionContext, ver: Version) -> Version:
     #
     # Get the last tag version (1.2.3) prior to this commit
     #
-    if not ver.hash or len(ver.hash.strip()) == 0:
-        return ValueError("No hash found.")
+    if _none_or_empty(ver.hash):
+        raise ValueError("No hash found.")
 
     # get last tag
     tag_prefix_option = f"--match={ctx.tag_prefix}*" if ctx.tag_prefix else ""
@@ -351,7 +369,8 @@ def validate_context(ctx: VersionContext, ver: Version) -> Version:
         VersionIncrement.MINOR,
         VersionIncrement.PATCH,
     ]:
-        return ValueError("Invalid increment value. Must be major, minor, or patch")
+        raise ValueError(
+            "Invalid increment value. Must be major, minor, or patch")
 
     return ver
 
@@ -388,7 +407,8 @@ def get_version(
 
 if __name__ == "__main__":
     doc_keys = ",".join(
-        [k for k in vars(Version()).keys() if k != "last_tag" and k != "last_hash"]
+        [k for k in vars(Version()).keys() if k !=
+         "last_tag" and k != "last_hash"]
     )
     parser = argparse.ArgumentParser(
         description="Increment a semantic version component of a git tag."
@@ -398,7 +418,8 @@ if __name__ == "__main__":
         choices=["major", "minor", "patch"],
         help="The version component to increment",
     )
-    parser.add_argument("--tag-prefix", help="Optional prefix for git tags", default="")
+    parser.add_argument(
+        "--tag-prefix", help="Optional prefix for git tags", default="")
     parser.add_argument(
         "--show",
         default="all",
