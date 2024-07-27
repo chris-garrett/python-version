@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-
 #
 # git@github.com:chris-garrett/python-version.git
 #
-
 # CHANGELOG
+#
+# Fri, Jul 27, 2024 - fix: utcnow() is deprecated and scheduled for removal
+#                   - fix: fix bug when there is no tag prefix
+#                   - feat: added VersionBuilder and VersionViewBuilder to improve the dx a bit
 #
 # Tue, May 7, 2024  - fix: strip-components wasnt actually using the value, add better error message, skip if 0
 #                   - fix: dont return ValueErrors, raise them!
@@ -17,15 +19,20 @@
 #
 # Sun, Apr 21, 2024 - initial version
 #
-
 import argparse
 import json
 import os
 import re
 import shlex
 import subprocess
+import sys
 from dataclasses import dataclass
-from datetime import datetime
+
+if sys.version_info < (3, 12):
+    from datetime import datetime
+else:
+    from datetime import datetime, UTC
+
 from enum import Enum
 from subprocess import CompletedProcess
 
@@ -137,8 +144,9 @@ def get_detached_branch(ctx: VersionContext, ver: Version) -> Version:
         raw_branches = exec(
             f"{_git_cmd_prefix(ctx)} branch --contains {git_hash}", capture=True
         ).stdout.strip()
-        branches = [l.strip()
-                    for l in raw_branches.splitlines() if "HEAD" not in l]
+        branches = [
+            line.strip() for line in raw_branches.splitlines() if "HEAD" not in line
+        ]
         if len(branches) > 1:
             raise ValueError(
                 f"Multiple branches found for {git_hash}. Could not determine branch name"
@@ -334,10 +342,11 @@ def get_last_tag(ctx: VersionContext, ver: Version) -> Version:
     if _none_or_empty(ver.hash):
         raise ValueError("No hash found.")
 
+    tag_prefix = ctx.tag_prefix if ctx.tag_prefix else "[0-9]"
+
     # get last tag
-    tag_prefix_option = f"--match={ctx.tag_prefix}*" if ctx.tag_prefix else ""
     result = exec(
-        f"{_git_cmd_prefix(ctx)} describe --tags --abbrev=0 {tag_prefix_option} {ver.hash}^",
+        f"{_git_cmd_prefix(ctx)} describe --tags --abbrev=0 --match={tag_prefix}* {ver.hash}^",
         capture=True,
     )
     if result.returncode == 0:
@@ -355,7 +364,10 @@ def get_last_tag(ctx: VersionContext, ver: Version) -> Version:
 
 
 def get_timestamp(ctx: VersionContext, ver: Version) -> Version:
-    now = datetime.utcnow()
+    if sys.version_info < (3, 12):
+        now = datetime.utcnow()
+    else:
+        now = datetime.now(UTC)
     ver.timestamp = now.strftime("%Y%m%dT%H%M%SZ")
     return ver
 
@@ -405,6 +417,113 @@ def get_version(
     return v
 
 
+class VersionBuilder:
+    def __init__(self):
+        self.increment = VersionIncrement.MINOR
+        self.tag_prefix = None
+        self.strip_components = None
+
+    def withIncrement(self, increment: VersionIncrement):
+        self.increment = increment
+        return self
+
+    def withTagPrefix(self, tag_prefix: str):
+        self.tag_prefix = tag_prefix
+        return self
+
+    def withStripComponents(self, strip_components: int):
+        self.strip_components = strip_components
+        return self
+
+    def build(self) -> Version:
+        ctx = VersionContext(increment=self.increment)
+        if self.tag_prefix:
+            ctx.tag_prefix = self.tag_prefix
+        if self.strip_components:
+            ctx.strip_branch_components = self.strip_components
+        return get_version(ctx)
+
+
+class VersionViewBuilder:
+    def __init__(self, ver: Version):
+        self.ver = ver
+
+        self.show = None
+        self.format = "csv"
+        self.json_pretty = False
+        self.csv_header = False
+        self.env_prefix = "VERSION_"
+
+    def withShow(self, show):
+        self.show = show
+        return self
+
+    def withFormat(self, format):
+        self.format = format
+        return self
+
+    def withJsonPretty(self, json_pretty):
+        self.json_pretty = json_pretty
+        return self
+
+    def withCsvHeader(self, csv_header):
+        self.csv_header = csv_header
+        return self
+
+    def withEnvPrefix(self, env_prefix):
+        self.env_prefix = env_prefix
+        return self
+
+    def build(self) -> str:
+        ver_dict = vars(self.ver)
+
+        # get/validate list of keys to print
+        print_keys = []
+        if self.show:
+            if self.show == "all":
+                print_keys = list(ver_dict.keys())
+            else:
+                for key in self.show.split(","):
+                    if key not in ver_dict:
+                        raise ValueError(f"Field '{key}' not found.")
+                print_keys = self.show.split(",")
+        else:
+            print_keys.append(ver.semver_full)
+
+        # print output in json
+        if self.format == "json":
+            values = {key: ver_dict[key] for key in print_keys}
+            return json.dumps(values, indent=4 if self.json_pretty else None)
+
+        # print output in env format
+        elif self.format == "env":
+            out = []
+            for key in print_keys:
+                value = ver_dict[key]
+                print_value = ""
+                if value is not None:
+                    if isinstance(value, str):
+                        print_value = f'"{value}"'
+                    else:
+                        print_value = str(value)
+                out.append(
+                    f"{self.env_prefix.upper()}{key.upper()}={print_value}")
+            return "\n".join(out)
+
+        # print output in csv separated format
+        else:
+            out = []
+            if self.csv_header:
+                out.append(",".join(print_keys))
+
+            values = [
+                "" if ver_dict[key] is None else str(ver_dict[key])
+                for key in print_keys
+            ]
+            out.append(",".join(values))
+            return "\n".join(out)
+
+
 if __name__ == "__main__":
     doc_keys = ",".join(
         [k for k in vars(Version()).keys() if k !=
@@ -428,7 +547,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--format",
         default="csv",
-        help=f"Format to display in. Default is comma separated. Values: csv, json, env",
+        help="Format to display in. Default is comma separated. Values: csv, json, env",
     )
     parser.add_argument(
         "--json-pretty",
@@ -455,44 +574,11 @@ if __name__ == "__main__":
     if args.strip_branch_components:
         ctx.strip_branch_components = int(args.strip_branch_components)
     ver = get_version(ctx)
-    ver_dict = vars(ver)
 
-    # get/validate list of keys to print
-    print_keys = []
-    if args.show:
-        if args.show == "all":
-            print_keys = list(ver_dict.keys())
-        else:
-            for key in args.show.split(","):
-                if key not in ver_dict:
-                    raise ValueError(f"Field '{key}' not found.")
-            print_keys = args.show.split(",")
-    else:
-        print_keys.append(ver.semver_full)
-
-    # print output in json
-    if args.format == "json":
-        values = {key: ver_dict[key] for key in print_keys}
-        print(json.dumps(values, indent=4 if args.json_pretty else None))
-
-    # print output in env format
-    elif args.format == "env":
-        for key in print_keys:
-            value = ver_dict[key]
-            print_value = ""
-            if value is not None:
-                if isinstance(value, str):
-                    print_value = f'"{value}"'
-                else:
-                    print_value = str(value)
-            print(f"{args.env_prefix.upper()}{key.upper()}={print_value}")
-
-    # print output in csv separated format
-    else:
-        if args.csv_header:
-            print(",".join(print_keys))
-
-        values = [
-            "" if ver_dict[key] is None else str(ver_dict[key]) for key in print_keys
-        ]
-        print(",".join(values))
+    b = VersionViewBuilder(ver)
+    b.withShow(args.show)
+    b.withFormat(args.format)
+    b.withJsonPretty(args.json_pretty)
+    b.withCsvHeader(args.csv_header)
+    b.withEnvPrefix(args.env_prefix)
+    print(b.build())
