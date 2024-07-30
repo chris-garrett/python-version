@@ -4,6 +4,10 @@
 #
 # CHANGELOG
 #
+# Tue, Jul 30, 2024 - feat: added --no-quotes option specifically for github actions. expressions are run
+#                     prior to bash execution so ${{ .env.BUILD_SEMVER_FULL }} will contain quotes.
+#                   - fix: default for show should be "all" fields like before
+#
 # Fri, Jul 27, 2024 - fix: utcnow() is deprecated and scheduled for removal
 #                   - fix: fix bug when there is no tag prefix
 #                   - feat: added VersionBuilder and VersionViewBuilder to improve the dx a bit
@@ -181,8 +185,7 @@ def strip_branch_components(ctx: VersionContext, ver: Version) -> Version:
                 f"Cannot strip {ctx.strip_branch_components} components from a branch '{ver.branch}' with only {len(parts)} component(s)"
             )
 
-        ver.branch = "/".join(ver.branch.split("/")
-                              [ctx.strip_branch_components:])
+        ver.branch = "/".join(ver.branch.split("/")[ctx.strip_branch_components :])
     return ver
 
 
@@ -222,7 +225,7 @@ def build_version_components(ctx: VersionContext, ver: Version) -> Version:
 
     last_ver = ver.last_tag
     if ver.tag_prefix and len(ver.tag_prefix) > 0:
-        last_ver = ver.last_tag[len(ver.tag_prefix):].strip()
+        last_ver = ver.last_tag[len(ver.tag_prefix) :].strip()
 
     parts = re.split(semver_rx, last_ver)
     if (
@@ -285,11 +288,9 @@ def build_tag(ctx: VersionContext, ver: Version) -> Version:
 
 def _get_branch_full(ver: Version, separator: str = "-") -> str:
     branch_value = (
-        f"{separator}{ver.branch}" if ver.branch not in (
-            "main", "master") else ""
+        f"{separator}{ver.branch}" if ver.branch not in ("main", "master") else ""
     )
-    commits_value = f".{ver.commits}" if ver.branch not in (
-        "main", "master") else ""
+    commits_value = f".{ver.commits}" if ver.branch not in ("main", "master") else ""
     return f"{branch_value}{commits_value}"
 
 
@@ -381,8 +382,7 @@ def validate_context(ctx: VersionContext, ver: Version) -> Version:
         VersionIncrement.MINOR,
         VersionIncrement.PATCH,
     ]:
-        raise ValueError(
-            "Invalid increment value. Must be major, minor, or patch")
+        raise ValueError("Invalid increment value. Must be major, minor, or patch")
 
     return ver
 
@@ -448,11 +448,14 @@ class VersionViewBuilder:
     def __init__(self, ver: Version):
         self.ver = ver
 
-        self.show = None
+        self.show = "all"
         self.format = "csv"
         self.json_pretty = False
         self.csv_header = False
         self.env_prefix = "VERSION_"
+        # Github actions run expressions prior to bash execution. Quoted
+        # are left bare so ${{ .env.SOMEVAR }} will contain quotes.
+        self.no_quotes = False
 
     def withShow(self, show):
         self.show = show
@@ -474,6 +477,19 @@ class VersionViewBuilder:
         self.env_prefix = env_prefix
         return self
 
+    def withNoQuotes(self):
+        self.no_quotes = True
+        return self
+
+    def _build_value(self, value, no_quotes=False):
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            if not no_quotes:
+                v = value.replace('"', '\\"')
+                return f'"{v}"'
+        return value
+
     def build(self) -> str:
         ver_dict = vars(self.ver)
 
@@ -488,7 +504,7 @@ class VersionViewBuilder:
                         raise ValueError(f"Field '{key}' not found.")
                 print_keys = self.show.split(",")
         else:
-            print_keys.append(ver.semver_full)
+            print_keys.append("semver_full")
 
         # print output in json
         if self.format == "json":
@@ -500,14 +516,8 @@ class VersionViewBuilder:
             out = []
             for key in print_keys:
                 value = ver_dict[key]
-                print_value = ""
-                if value is not None:
-                    if isinstance(value, str):
-                        print_value = f'"{value}"'
-                    else:
-                        print_value = str(value)
-                out.append(
-                    f"{self.env_prefix.upper()}{key.upper()}={print_value}")
+                print_value = str(self._build_value(value, self.no_quotes))
+                out.append(f"{self.env_prefix.upper()}{key.upper()}={print_value}")
             return "\n".join(out)
 
         # print output in csv separated format
@@ -516,18 +526,18 @@ class VersionViewBuilder:
             if self.csv_header:
                 out.append(",".join(print_keys))
 
-            values = [
-                "" if ver_dict[key] is None else str(ver_dict[key])
-                for key in print_keys
-            ]
+            values = []
+            for key in print_keys:
+                value = str(self._build_value(ver_dict[key], self.no_quotes))
+                values.append(value)
+
             out.append(",".join(values))
             return "\n".join(out)
 
 
 if __name__ == "__main__":
     doc_keys = ",".join(
-        [k for k in vars(Version()).keys() if k !=
-         "last_tag" and k != "last_hash"]
+        [k for k in vars(Version()).keys() if k != "last_tag" and k != "last_hash"]
     )
     parser = argparse.ArgumentParser(
         description="Increment a semantic version component of a git tag."
@@ -537,8 +547,7 @@ if __name__ == "__main__":
         choices=["major", "minor", "patch"],
         help="The version component to increment",
     )
-    parser.add_argument(
-        "--tag-prefix", help="Optional prefix for git tags", default="")
+    parser.add_argument("--tag-prefix", help="Optional prefix for git tags", default="")
     parser.add_argument(
         "--show",
         default="all",
@@ -563,6 +572,11 @@ if __name__ == "__main__":
         "--env-prefix", help="Optional prefix for output keys", default="VERSION_"
     )
     parser.add_argument(
+        "--no-quotes",
+        help="Don't wrap strings in quotes. Github Actions run expressions prior to bash execution",
+        action="store_true",
+    )
+    parser.add_argument(
         "--strip-branch-components",
         help="Optional number of branch components (paths) to strip from the start of the branch name",
     )
@@ -581,4 +595,6 @@ if __name__ == "__main__":
     b.withJsonPretty(args.json_pretty)
     b.withCsvHeader(args.csv_header)
     b.withEnvPrefix(args.env_prefix)
+    if args.no_quotes:
+        b.withNoQuotes()
     print(b.build())
